@@ -1,4 +1,3 @@
-
 import type { StylePreset, AspectRatio } from './types';
 
 export const STYLE_PRESETS: StylePreset[] = [
@@ -8,10 +7,12 @@ export const STYLE_PRESETS: StylePreset[] = [
   { id: 'ecommerce', name: 'E-commerce', promptSuffix: 'against a plain, solid white background, with perfect lighting to highlight product details, in the style of an Amazon or Shopify product listing' },
 ];
 
-export const ASPECT_RATIOS: AspectRatio[] = [
-  { id: '16:9', name: '16:9', promptSuffix: 'The final image must have a landscape 16:9 aspect ratio.' },
-  { id: '9:16', name: '9:16', promptSuffix: 'The final image must have a portrait 9:16 aspect ratio, suitable for stories or reels.' },
-  { id: '1:1', name: '1:1', promptSuffix: 'The final image must have a square 1:1 aspect ratio.' },
+export const ASPECT_RATIOS: { value: AspectRatio; label: string }[] = [
+  { value: '1:1', label: 'Square' },
+  { value: '16:9', label: 'Landscape' },
+  { value: '9:16', label: 'Portrait' },
+  { value: '4:3', label: 'Standard' },
+  { value: '3:4', label: 'Tall' },
 ];
 
 export const STOCK_MODELS: string[] = [

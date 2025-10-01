@@ -1,7 +1,8 @@
+
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import type { StylePreset, AspectRatio } from './types';
-import { STYLE_PRESETS, ASPECT_RATIOS, STOCK_MODELS } from './constants';
-import { generateCompositeImage, fileToBase64, urlToBase64 } from './services/geminiService';
+import { STYLE_PRESETS, STOCK_MODELS, ASPECT_RATIOS } from './constants';
+import { generateCompositeImage, fileToBase64, urlToBase64, generateImageFromText, addWatermark } from './services/geminiService';
 
 // --- Helper Components (defined outside main component) ---
 
@@ -35,9 +36,9 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ label, onFileSelect, prev
   return (
     <div className="w-full">
       <label className="block text-sm font-medium text-cyan-300 mb-2">{label}</label>
-      <div className="w-full aspect-square bg-gray-900/50 border-2 border-dashed border-cyan-400/30 rounded-lg flex items-center justify-center relative transition-all duration-300 hover:border-cyan-400">
+      <div className="w-full h-64 bg-gray-900/50 border-2 border-dashed border-cyan-400/30 rounded-lg flex items-center justify-center relative transition-all duration-300 hover:border-cyan-400">
         {previewUrl ? (
-          <img src={previewUrl} alt="Preview" className="w-full h-full object-cover rounded-lg" />
+          <img src={previewUrl} alt="Preview" className="w-full h-full object-contain rounded-lg p-1" />
         ) : (
           <div className="text-center text-gray-400">
             <UploadIcon className="mx-auto w-12 h-12 text-cyan-400/50" />
@@ -133,16 +134,22 @@ const StockModelModal: React.FC<StockModelModalProps> = ({ isOpen, onClose, onSe
     );
 };
 
+type GenerationMode = 'composite' | 'text';
+type OutputFormat = 'jpeg' | 'png';
+
 // --- Main App Component ---
 
 const App: React.FC = () => {
+    const [generationMode, setGenerationMode] = useState<GenerationMode>('composite');
     const [modelImageFile, setModelImageFile] = useState<File | null>(null);
     const [modelImageUrl, setModelImageUrl] = useState<string | null>(null);
     const [productImageFile, setProductImageFile] = useState<File | null>(null);
 
     const [prompt, setPrompt] = useState<string>('');
     const [selectedStyle, setSelectedStyle] = useState<StylePreset>(STYLE_PRESETS[0]);
-    const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatio>(ASPECT_RATIOS[0]);
+    const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
+    const [jpegQuality, setJpegQuality] = useState<number>(0.92);
+    const [outputFormat, setOutputFormat] = useState<OutputFormat>('jpeg');
 
     const [generatedImage, setGeneratedImage] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -179,89 +186,54 @@ const App: React.FC = () => {
     };
 
     const handleGenerate = useCallback(async () => {
-        if (!productImageFile) {
-            setError('Please upload a product image.');
-            return;
-        }
-        if (!modelImageFile && !modelImageUrl) {
-            setError('Please upload or select a model image.');
-            return;
-        }
-
         setError(null);
         setIsLoading(true);
         setGeneratedImage(null);
 
         try {
-            // FIX: Map the `base64` property from `urlToBase64` to `data` to match the expected type for `generateCompositeImage`.
-            const modelImgData = modelImageFile
-                ? { data: await fileToBase64(modelImageFile), mimeType: modelImageFile.type }
-                : await urlToBase64(modelImageUrl!).then(({ base64, mimeType }) => ({ data: base64, mimeType }));
+            const fullPrompt = `${prompt}. ${selectedStyle.promptSuffix}.`;
+            let result: string;
 
-            const productImgData = { data: await fileToBase64(productImageFile), mimeType: productImageFile.type };
+            if (generationMode === 'composite') {
+                if (!modelImageFile && !modelImageUrl) {
+                    throw new Error('Please upload or select a model image.');
+                }
+                const modelImgData = modelImageFile
+                    ? { data: await fileToBase64(modelImageFile), mimeType: modelImageFile.type }
+                    : await urlToBase64(modelImageUrl!).then(({ base64, mimeType }) => ({ data: base64, mimeType }));
+                
+                const productImgData = productImageFile
+                    ? { data: await fileToBase64(productImageFile), mimeType: productImageFile.type }
+                    : null;
+                
+                result = await generateCompositeImage(modelImgData, productImgData, fullPrompt);
 
-            const fullPrompt = `${prompt}. The image should be styled ${selectedStyle.promptSuffix}. ${selectedAspectRatio.promptSuffix}`;
+            } else { // 'text' mode
+                if (!prompt.trim()) {
+                    throw new Error('Please enter a prompt to generate an image.');
+                }
+                result = await generateImageFromText(fullPrompt, aspectRatio, outputFormat);
+            }
             
-            const result = await generateCompositeImage(modelImgData, productImgData, fullPrompt);
-            setGeneratedImage(result);
+            const watermarkedResult = await addWatermark(result, outputFormat, jpegQuality);
+            setGeneratedImage(watermarkedResult);
 
         } catch (err: any) {
             setError(err.message || 'An unknown error occurred.');
         } finally {
             setIsLoading(false);
         }
-    }, [modelImageFile, modelImageUrl, productImageFile, prompt, selectedStyle, selectedAspectRatio]);
+    }, [generationMode, modelImageFile, modelImageUrl, productImageFile, prompt, selectedStyle, aspectRatio, outputFormat, jpegQuality]);
 
     const downloadImage = () => {
         if (!generatedImage) return;
-
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = generatedImage;
-        
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return;
-
-            canvas.width = img.width;
-            canvas.height = img.height;
-
-            ctx.drawImage(img, 0, 0);
-
-            const fontSize = Math.max(24, img.width / 30);
-            ctx.font = `bold ${fontSize}px sans-serif`;
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'bottom';
-            
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-            ctx.shadowOffsetX = 2;
-            ctx.shadowOffsetY = 2;
-            ctx.shadowBlur = 4;
-
-            const padding = fontSize;
-            ctx.fillText('WAII', canvas.width - padding, canvas.height - padding);
-
-            const link = document.createElement('a');
-            link.href = canvas.toDataURL('image/png');
-            link.download = 'waii-generated-image.png';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        };
-
-        img.onerror = () => {
-            // Fallback to direct download if canvas method fails
-            const link = document.createElement('a');
-            link.href = generatedImage;
-            link.download = 'waii-generated-image.png';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        };
+        const link = document.createElement('a');
+        link.href = generatedImage;
+        link.download = `waii-generated-image.${outputFormat}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     };
-
 
     return (
         <div className="min-h-screen w-full relative overflow-hidden">
@@ -280,37 +252,50 @@ const App: React.FC = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     {/* Left: Controls */}
                     <div className="bg-gray-900/50 border border-cyan-500/30 rounded-xl p-6 backdrop-blur-sm neon-glow-box">
-                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                            <ImageUploader 
-                                label="1. Model Photo" 
-                                onFileSelect={handleModelFileUpload} 
-                                previewUrl={modelImagePreview}
-                                onStockSelect={() => setIsModalOpen(true)}
-                                stockSelectText="Or Select a Model"
-                            />
-                            <ImageUploader 
-                                label="2. Product Photo" 
-                                onFileSelect={setProductImageFile} 
-                                previewUrl={productImagePreview}
-                            />
-                       </div>
+                       <div className="flex border-b-2 border-cyan-500/30 mb-6 rounded-t-lg overflow-hidden">
+                            <button onClick={() => setGenerationMode('composite')} className={`flex-1 py-3 text-center font-semibold transition-all duration-300 ${generationMode === 'composite' ? 'bg-cyan-500/20 text-cyan-200 border-b-4 border-cyan-400' : 'text-gray-400 hover:bg-gray-800/50'}`}>
+                                Image Composite
+                            </button>
+                            <button onClick={() => setGenerationMode('text')} className={`flex-1 py-3 text-center font-semibold transition-all duration-300 ${generationMode === 'text' ? 'bg-cyan-500/20 text-cyan-200 border-b-4 border-cyan-400' : 'text-gray-400 hover:bg-gray-800/50'}`}>
+                                Text to Image
+                            </button>
+                        </div>
+                        
+                       {generationMode === 'composite' && (
+                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                <ImageUploader 
+                                    label="1. Model Photo" 
+                                    onFileSelect={handleModelFileUpload} 
+                                    previewUrl={modelImagePreview}
+                                    onStockSelect={() => setIsModalOpen(true)}
+                                    stockSelectText="Or Select a Model"
+                                />
+                                <ImageUploader 
+                                    label="2. Product Photo (Optional)" 
+                                    onFileSelect={setProductImageFile} 
+                                    previewUrl={productImagePreview}
+                                />
+                           </div>
+                       )}
 
                        <div className="mt-6">
-                           <label htmlFor="prompt" className="block text-sm font-medium text-cyan-300 mb-2">3. Smart Prompt</label>
+                           <label htmlFor="prompt" className="block text-sm font-medium text-cyan-300 mb-2">
+                            {generationMode === 'composite' ? '3. Smart Prompt' : '1. Prompt'}
+                           </label>
                            <div className="relative rounded-lg transition-shadow duration-300 prompt-box-glow">
                                 <textarea
                                     id="prompt"
                                     rows={4}
                                     value={prompt}
                                     onChange={(e) => setPrompt(e.target.value)}
-                                    placeholder="e.g., 'place the watch on the model's left wrist'"
+                                    placeholder={generationMode === 'composite' ? "e.g., 'place the watch on the wrist' or 'add a gold watch with a blue dial'" : "e.g., 'A high-resolution photo of a robot holding a red skateboard'"}
                                     className="w-full bg-gray-900/80 border-2 border-cyan-400/30 rounded-lg p-3 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400 focus:ring-0 transition-colors"
                                 />
                            </div>
                        </div>
 
                        <div className="mt-6">
-                            <h3 className="text-sm font-medium text-cyan-300 mb-2">4. Style Presets</h3>
+                            <h3 className="text-sm font-medium text-cyan-300 mb-2">{generationMode === 'composite' ? '4. Style Preset' : '2. Style Preset'}</h3>
                             <div className="flex flex-wrap gap-2">
                                 {STYLE_PRESETS.map(preset => (
                                     <button 
@@ -324,20 +309,57 @@ const App: React.FC = () => {
                             </div>
                        </div>
                        
-                       <div className="mt-6">
-                            <h3 className="text-sm font-medium text-cyan-300 mb-2">5. Image Size</h3>
+                       {generationMode === 'text' && (
+                            <div className="mt-6">
+                                <h3 className="text-sm font-medium text-cyan-300 mb-2">3. Aspect Ratio</h3>
+                                <div className="flex flex-wrap gap-2">
+                                    {ASPECT_RATIOS.map(ratio => (
+                                        <button 
+                                            key={ratio.value} 
+                                            onClick={() => setAspectRatio(ratio.value)}
+                                            className={`px-3 py-1.5 text-sm rounded-md transition-all duration-200 border-2 ${aspectRatio === ratio.value ? 'bg-cyan-500 text-black border-cyan-400 neon-glow-box' : 'bg-gray-800/50 border-gray-600 hover:bg-cyan-500/20 hover:border-cyan-500/50'}`}
+                                        >
+                                            {ratio.label} <span className="text-xs opacity-75">({ratio.value})</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                       )}
+
+                        <div className="mt-6">
+                            <h3 className="text-sm font-medium text-cyan-300 mb-2">{generationMode === 'composite' ? '5. Output Format' : '4. Output Format'}</h3>
                             <div className="flex flex-wrap gap-2">
-                                {ASPECT_RATIOS.map(ratio => (
+                                {(['jpeg', 'png'] as const).map(format => (
                                     <button 
-                                        key={ratio.id} 
-                                        onClick={() => setSelectedAspectRatio(ratio)}
-                                        className={`px-3 py-1.5 text-sm rounded-md transition-all duration-200 border-2 ${selectedAspectRatio.id === ratio.id ? 'bg-cyan-500 text-black border-cyan-400 neon-glow-box' : 'bg-gray-800/50 border-gray-600 hover:bg-cyan-500/20 hover:border-cyan-500/50'}`}
+                                        key={format} 
+                                        onClick={() => setOutputFormat(format)}
+                                        className={`px-3 py-1.5 text-sm rounded-md transition-all duration-200 border-2 ${outputFormat === format ? 'bg-cyan-500 text-black border-cyan-400 neon-glow-box' : 'bg-gray-800/50 border-gray-600 hover:bg-cyan-500/20 hover:border-cyan-500/50'}`}
                                     >
-                                        {ratio.name}
+                                        {format.toUpperCase()}
                                     </button>
                                 ))}
                             </div>
                        </div>
+
+                       {outputFormat === 'jpeg' && (
+                            <div className="mt-6">
+                                <h3 className="text-sm font-medium text-cyan-300 mb-2">{generationMode === 'composite' ? '6. JPEG Quality' : '5. JPEG Quality'}</h3>
+                                <div className="flex items-center gap-4">
+                                    <input
+                                        type="range"
+                                        min="0.1"
+                                        max="1"
+                                        step="0.01"
+                                        value={jpegQuality}
+                                        onChange={(e) => setJpegQuality(parseFloat(e.target.value))}
+                                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+                                    />
+                                    <span className="text-cyan-200 font-mono text-sm w-12 text-center">{Math.round(jpegQuality * 100)}%</span>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-1">Lower quality results in smaller file sizes (KB).</p>
+                            </div>
+                        )}
+
 
                        <button 
                             onClick={handleGenerate} 
@@ -352,22 +374,30 @@ const App: React.FC = () => {
                     <div className="bg-gray-900/50 border border-cyan-500/30 rounded-xl p-6 backdrop-blur-sm flex items-center justify-center min-h-[400px] lg:min-h-full neon-glow-box">
                         {generatedImage ? (
                             <div className="w-full">
-                                <h2 className="text-2xl font-bold text-center mb-4 neon-glow-text">Generated Photoshoot</h2>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+                                {generationMode === 'composite' && productImagePreview ? (
+                                    <>
+                                        <h2 className="text-2xl font-bold text-center mb-4 neon-glow-text">Generated Photoshoot</h2>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+                                            <div className="text-center">
+                                                <h3 className="text-lg text-cyan-200 mb-2">Original Product</h3>
+                                                <img src={productImagePreview} alt="Original Product" className="rounded-lg w-full object-contain max-h-96"/>
+                                            </div>
+                                            <div className="text-center">
+                                                <h3 className="text-lg text-cyan-200 mb-2">AI Generated</h3>
+                                                <div className="relative">
+                                                    <img src={generatedImage} alt="Generated" className="rounded-lg w-full object-contain max-h-96" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : (
                                     <div className="text-center">
-                                        <h3 className="text-lg text-cyan-200 mb-2">Original Product</h3>
-                                        <img src={productImagePreview!} alt="Original Product" className="rounded-lg w-full object-contain max-h-96"/>
-                                    </div>
-                                    <div className="text-center">
-                                        <h3 className="text-lg text-cyan-200 mb-2">AI Generated</h3>
-                                        <div className="relative">
-                                            <img src={generatedImage} alt="Generated" className="rounded-lg w-full object-contain max-h-96" />
-                                            <p className="absolute bottom-2 right-4 text-xl font-bold text-white neon-glow-text pointer-events-none" style={{ textShadow: '1px 1px 5px rgba(0,0,0,0.8)' }}>
-                                                WAII
-                                            </p>
+                                        <h2 className="text-2xl font-bold text-center mb-4 neon-glow-text">Your Creation</h2>
+                                        <div className="relative inline-block">
+                                            <img src={generatedImage} alt="Generated" className="rounded-lg w-full object-contain max-h-[500px]" />
                                         </div>
                                     </div>
-                                </div>
+                                )}
                                 <button onClick={downloadImage} className="w-full mt-6 bg-green-500/80 hover:bg-green-500 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-all duration-300">
                                     <DownloadIcon />
                                     Download Image
