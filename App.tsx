@@ -1,14 +1,14 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
-import type { StylePreset, AspectRatio } from './types';
-import { STYLE_PRESETS, STOCK_MODELS, ASPECT_RATIOS } from './constants';
-import { generateCompositeImage, fileToBase64, urlToBase64, generateImageFromText, addWatermark } from './services/geminiService';
+import type { StylePreset, AspectRatio } from './types.ts';
+import { STYLE_PRESETS, STOCK_MODELS, ASPECT_RATIOS } from './constants.ts';
+import { generateCompositeImage, fileToBase64, urlToBase64, generateImageFromText, addWatermark } from './services/geminiService.ts';
 
-import { ImageUploader } from './components/ImageUploader';
-import { Loader } from './components/Loader';
-import { ParticleBackground } from './components/ParticleBackground';
-import { StockModelModal } from './components/StockModelModal';
-import { DownloadIcon } from './components/icons';
+import { ImageUploader } from './components/ImageUploader.tsx';
+import { Loader } from './components/Loader.tsx';
+import { ParticleBackground } from './components/ParticleBackground.tsx';
+import { StockModelModal } from './components/StockModelModal.tsx';
+import { DownloadIcon } from './components/icons.tsx';
 
 
 type GenerationMode = 'composite' | 'text';

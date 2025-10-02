@@ -1,4 +1,4 @@
-import type { StylePreset, AspectRatio } from './types';
+import type { StylePreset, AspectRatio } from './types.ts';
 
 export const STYLE_PRESETS: StylePreset[] = [
   { id: 'studio', name: 'Professional Studio', promptSuffix: 'in a professional, clean, well-lit studio environment with a minimalist background. Aim for an ultra-realistic, photorealistic, 8k resolution image with cinematic lighting and sharp focus.' },

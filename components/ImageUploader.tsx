@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import { UploadIcon, CloseIcon } from './icons';
+import { UploadIcon, CloseIcon } from './icons.tsx';
 
 interface ImageUploaderProps {
   label: string;

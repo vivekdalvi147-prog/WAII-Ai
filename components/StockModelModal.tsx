@@ -1,5 +1,5 @@
 import React from 'react';
-import { STOCK_MODELS } from '../constants';
+import { STOCK_MODELS } from '../constants.ts';
 
 interface StockModelModalProps {
     isOpen: boolean;
